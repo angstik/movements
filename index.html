@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aïki Filaire</title>
+  <meta name="description" content="Analyse filaire et mécanique de techniques d'aïkido à partir d'une vidéo mono-caméra, 100 % navigateur.">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/",
+      "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Aïki Filaire</h1>
+    <label class="btn primary file-btn">
+      Ouvrir une vidéo…
+      <input type="file" id="fileInput" accept="video/*" hidden>
+    </label>
+    <label class="btn file-btn">
+      Charger une analyse (.json)
+      <input type="file" id="jsonInput" accept="application/json,.json" hidden>
+    </label>
+    <span class="spacer"></span>
+    <button class="btn" id="exportJson" disabled>Export JSON</button>
+    <button class="btn" id="exportCsv" disabled>Export CSV</button>
+    <button class="btn icon" id="themeBtn" title="Thème clair / sombre" aria-label="Basculer le thème">◐</button>
+  </header>
+
+  <main class="layout">
+    <!-- Vidéo + surcouche 2D -->
+    <section class="panel video-panel">
+      <div class="stage" id="stage">
+        <div class="drop-hint" id="dropHint">
+          <p><b>Déposez une vidéo ici</b> ou utilisez « Ouvrir une vidéo… »</p>
+          <p class="muted">Smartphone fixe, les deux pratiquants entiers dans le cadre. Rien n'est envoyé sur un serveur.</p>
+        </div>
+        <video id="video" playsinline muted preload="auto"></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="transport">
+        <button class="btn icon" id="prevBtn" title="Image précédente (←)" aria-label="Image précédente">⏮</button>
+        <button class="btn icon" id="playBtn" title="Lecture / pause (espace)" aria-label="Lecture">▶</button>
+        <button class="btn icon" id="nextBtn" title="Image suivante (→)" aria-label="Image suivante">⏭</button>
+        <input type="range" id="seek" min="0" max="1" step="0.001" value="0" aria-label="Position">
+        <span class="time" id="timeLabel">0.00 / 0.00 s</span>
+        <select id="rate" title="Vitesse de lecture" aria-label="Vitesse de lecture">
+          <option value="0.1">×0.1</option>
+          <option value="0.25">×0.25</option>
+          <option value="0.5">×0.5</option>
+          <option value="1" selected>×1</option>
+        </select>
+      </div>
+      <div class="toggles">
+        <label><input type="checkbox" id="showSkel" checked> Filaire</label>
+        <label><input type="checkbox" id="showCom" checked> CoM + fil à plomb</label>
+        <label><input type="checkbox" id="showRaw"> Détections brutes</label>
+        <label><input type="checkbox" id="dimVideo"> Assombrir la vidéo</label>
+      </div>
+    </section>
+
+    <!-- Vue 3D -->
+    <section class="panel view3d-panel">
+      <div class="view3d" id="view3d"></div>
+      <div class="views">
+        <span class="muted">Vue :</span>
+        <button class="btn small" data-view="camera">Smartphone</button>
+        <button class="btn small" data-view="front">Face</button>
+        <button class="btn small" data-view="left">Profil G</button>
+        <button class="btn small" data-view="right">Profil D</button>
+        <button class="btn small" data-view="back">Dos</button>
+        <button class="btn small" data-view="top">Dessus</button>
+        <button class="btn small" data-view="iso">3/4</button>
+        <label class="follow"><input type="checkbox" id="follow" checked> Suivre</label>
+      </div>
+      <p class="muted small-note" id="groundInfo">Traits pleins = côté gauche du pratiquant, clairs = côté droit. Anneau au sol = CoM extrapolé (XCoM).</p>
+    </section>
+
+    <!-- Réglages -->
+    <section class="panel controls-panel">
+      <h2>1. Extraction</h2>
+      <div class="grid2">
+        <label>Début (s) <input type="number" id="tStart" step="0.01" min="0" value="0"></label>
+        <label>Fin (s) <input type="number" id="tEnd" step="0.01" min="0" value="0"></label>
+        <button class="btn small" id="setStart">⇤ ici</button>
+        <button class="btn small" id="setEnd">ici ⇥</button>
+        <label>Fréquence d'analyse
+          <select id="fps">
+            <option value="15">15 im/s</option>
+            <option value="25">25 im/s</option>
+            <option value="30" selected>30 im/s</option>
+            <option value="50">50 im/s</option>
+            <option value="60">60 im/s</option>
+          </select>
+        </label>
+        <label>Modèle
+          <select id="model">
+            <option value="lite">lite (rapide)</option>
+            <option value="full" selected>full</option>
+            <option value="heavy">heavy (précis, lent)</option>
+          </select>
+        </label>
+        <label>Confiance détection <input type="number" id="minDet" min="0.1" max="0.9" step="0.05" value="0.4"></label>
+        <label>Confiance présence <input type="number" id="minPres" min="0.1" max="0.9" step="0.05" value="0.4"></label>
+      </div>
+      <div class="row">
+        <button class="btn primary" id="analyzeBtn" disabled>Analyser</button>
+        <button class="btn" id="cancelBtn" hidden>Annuler</button>
+      </div>
+      <progress id="progress" max="1" value="0" hidden></progress>
+      <p class="status" id="status" role="status">Aucune vidéo chargée.</p>
+
+      <h2>2. Pratiquants</h2>
+      <div class="grid2">
+        <label><span><i class="swatch a"></i> Personne A</span><input type="text" id="nameA" value="Tori"></label>
+        <label><span><i class="swatch b"></i> Personne B</span><input type="text" id="nameB" value="Uke"></label>
+      </div>
+      <div class="row">
+        <button class="btn small" id="swapBtn" disabled title="Échange les identités A/B à partir de l'image courante">Inverser A ↔ B à partir d'ici</button>
+      </div>
+
+      <h2>3. Reconstruction</h2>
+      <div class="grid2">
+        <label>Champ horizontal caméra (°) <input type="number" id="hfov" min="30" max="120" step="1" value="66"></label>
+        <label>Lissage σ (images) <input type="number" id="sigma" min="0" max="8" step="0.5" value="1.5"></label>
+        <label>Sol
+          <select id="ground">
+            <option value="auto" selected>ajusté sur les appuis</option>
+            <option value="camera">téléphone horizontal</option>
+          </select>
+        </label>
+        <label>Tolérance contact pied (m) <input type="number" id="contactTol" min="0.01" max="0.3" step="0.01" value="0.10"></label>
+        <label>Trou max. interpolé (images) <input type="number" id="maxGap" min="0" max="30" step="1" value="6"></label>
+      </div>
+      <p class="muted small-note">Les réglages 2 et 3 se recalculent instantanément, sans ré-extraction.</p>
+    </section>
+
+    <!-- Graphiques -->
+    <section class="panel charts-panel">
+      <div class="charts-head">
+        <h2>Indicateurs</h2>
+        <details class="metric-picker">
+          <summary class="btn small">Choisir…</summary>
+          <div id="metricList" class="metric-list"></div>
+        </details>
+        <div class="legend">
+          <span><i class="swatch a"></i><span id="legendA">Tori</span></span>
+          <span><i class="swatch b"></i><span id="legendB">Uke</span></span>
+          <span><i class="swatch pair"></i>Couple</span>
+        </div>
+      </div>
+      <div id="charts" class="charts"></div>
+      <details class="values">
+        <summary>Valeurs à l'instant courant (tableau)</summary>
+        <table id="valuesTable"></table>
+      </details>
+    </section>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
