@@ -2,7 +2,14 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a19">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Aïki Filaire">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <title>Aïki Filaire</title>
   <meta name="description" content="Analyse filaire et mécanique de techniques d'aïkido à partir d'une vidéo mono-caméra, 100 % navigateur.">
   <link rel="stylesheet" href="css/style.css">
@@ -19,19 +26,41 @@
 <body>
   <header class="topbar">
     <h1>Aïki Filaire</h1>
+    <label class="btn primary file-btn mobile-only">
+      ● Filmer
+      <input type="file" id="captureInput" accept="video/*" capture="environment" hidden>
+    </label>
     <label class="btn primary file-btn">
       Ouvrir une vidéo…
-      <input type="file" id="fileInput" accept="video/*" hidden>
+      <input type="file" id="fileInput" accept="video/*,.mov,.mp4,.m4v,.webm,.mkv" hidden>
     </label>
-    <label class="btn file-btn">
-      Charger une analyse (.json)
-      <input type="file" id="jsonInput" accept="application/json,.json" hidden>
-    </label>
+    <button class="btn" id="urlBtn" title="Ouvrir une vidéo par son adresse (lien direct)">URL…</button>
+    <button class="btn" id="libraryBtn">Bibliothèque</button>
     <span class="spacer"></span>
-    <button class="btn" id="exportJson" disabled>Export JSON</button>
-    <button class="btn" id="exportCsv" disabled>Export CSV</button>
+    <details class="menu">
+      <summary class="btn">Fichiers</summary>
+      <div class="menu-list">
+        <label class="btn file-btn">
+          Charger une analyse (.json)
+          <input type="file" id="jsonInput" accept="application/json,.json" hidden>
+        </label>
+        <button class="btn" id="exportJson" disabled>Export JSON</button>
+        <button class="btn" id="exportCsv" disabled>Export CSV</button>
+      </div>
+    </details>
     <button class="btn icon" id="themeBtn" title="Thème clair / sombre" aria-label="Basculer le thème">◐</button>
   </header>
+
+
+  <dialog id="libraryDlg" class="library">
+    <div class="library-head">
+      <h2>Bibliothèque locale</h2>
+      <button class="btn icon" id="libraryClose" aria-label="Fermer">✕</button>
+    </div>
+    <p class="muted small-note" id="libraryInfo">Les vidéos et analyses restent dans ce navigateur, sur cet appareil.</p>
+    <label class="small-note keep"><input type="checkbox" id="autoKeep" checked> Ajouter automatiquement chaque vidéo ouverte</label>
+    <ul id="libraryList" class="library-list"></ul>
+  </dialog>
 
   <main class="layout">
     <!-- Vidéo + surcouche 2D -->
@@ -40,6 +69,7 @@
         <div class="drop-hint" id="dropHint">
           <p><b>Déposez une vidéo ici</b> ou utilisez « Ouvrir une vidéo… »</p>
           <p class="muted">Smartphone fixe, les deux pratiquants entiers dans le cadre. Rien n'est envoyé sur un serveur.</p>
+          <p class="muted mobile-only">Sur téléphone : « ● Filmer » ouvre la caméra, « Ouvrir une vidéo… » la galerie.</p>
         </div>
         <video id="video" playsinline muted preload="auto"></video>
         <canvas id="overlay"></canvas>
@@ -65,8 +95,14 @@
       </div>
     </section>
 
+    <nav class="tabbar" aria-label="Sections">
+      <button class="tab active" data-tab="view3d-panel">3D</button>
+      <button class="tab" data-tab="charts-panel">Courbes</button>
+      <button class="tab" data-tab="controls-panel">Réglages</button>
+    </nav>
+
     <!-- Vue 3D -->
-    <section class="panel view3d-panel">
+    <section class="panel view3d-panel tab-panel active">
       <div class="view3d" id="view3d"></div>
       <div class="views">
         <span class="muted">Vue :</span>
@@ -83,7 +119,7 @@
     </section>
 
     <!-- Réglages -->
-    <section class="panel controls-panel">
+    <section class="panel controls-panel tab-panel">
       <h2>1. Extraction</h2>
       <div class="grid2">
         <label>Début (s) <input type="number" id="tStart" step="0.01" min="0" value="0"></label>
@@ -142,7 +178,7 @@
     </section>
 
     <!-- Graphiques -->
-    <section class="panel charts-panel">
+    <section class="panel charts-panel tab-panel">
       <div class="charts-head">
         <h2>Indicateurs</h2>
         <details class="metric-picker">

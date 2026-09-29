@@ -16,6 +16,29 @@ Ou publier le dépôt tel quel sur GitHub Pages. Navigateur conseillé : Chrome 
 Les bibliothèques sont chargées depuis jsDelivr, le modèle depuis `storage.googleapis.com` : une connexion
 est nécessaire au premier chargement.
 
+## Sur téléphone
+
+- **● Filmer** ouvre directement la caméra ; **Ouvrir une vidéo…** ouvre la galerie.
+- Interface à onglets (3D / Courbes / Réglages) sous la vidéo ; modèle `lite` par défaut.
+- L'écran est maintenu allumé pendant l'analyse (Wake Lock, si le navigateur le permet).
+  Garder l'onglet au premier plan : en arrière-plan, le navigateur suspend le traitement.
+- Installable sur l'écran d'accueil (manifeste web).
+
+## Bibliothèque locale
+
+Chaque vidéo ouverte ou filmée est conservée (option désactivable) dans le stockage du navigateur (IndexedDB),
+avec son analyse, enregistrée automatiquement : identités corrigées et réglages compris. On retrouve et rouvre
+tout depuis **Bibliothèque**, sans rien renvoyer sur un serveur. Le stockage est propre à l'appareil et au navigateur.
+Il peut être vidé par le système si l'espace manque, sauf si le navigateur accorde le stockage persistant.
+
+## Vidéos en ligne
+
+- **URL…** : charge un lien direct vers un fichier vidéo, à condition que le serveur autorise CORS.
+- **YouTube** : impossible depuis une page web, car YouTube ne sert pas de fichier vidéo lisible par un site tiers.
+  Télécharger la vidéo à part (par exemple avec `yt-dlp`), uniquement si les conditions d'utilisation et
+  les droits de la vidéo le permettent (vos propres vidéos, licence Creative Commons, accord de l'auteur),
+  puis ouvrir le fichier.
+
 ## Chaîne de traitement
 
 | Étape | Module | Méthode |
@@ -24,6 +47,7 @@ est nécessaire au premier chargement.
 | Identités A/B | `js/tracker.js` | Suppression des doublons (2 poses sur un même corps), association par continuité spatiale (position prédite + échelle) ; correction manuelle « Inverser A ↔ B à partir d'ici » |
 | Scène 3D commune | `js/reconstruct.js` | Les coordonnées *world* MediaPipe sont centrées sur chaque bassin : la position relative est restituée par un modèle sténopé (profondeur = f / échelle px·m⁻¹, f déduit du champ horizontal supposé). Sol estimé par ajustement de plan robuste sur les appuis. Interpolation des trous courts et lissage gaussien à phase nulle |
 | Indicateurs | `js/biomech.js` | CoM segmentaire (de Leva 1996), polygone de sustentation, marge statique, XCoM (Hof 2005), angles articulaires 3D, vitesses, orientation du bassin, relations Tori/Uke |
+| Bibliothèque | `js/library.js` | IndexedDB : vidéo (blob), vignette, analyse sérialisée |
 | Affichage | `js/overlay.js`, `js/scene3d.js`, `js/charts.js` | Surcouche filaire sur la vidéo, vue 3D orbitale (Three.js) avec préréglages Smartphone / Face / Profils / Dos / Dessus / 3/4, graphiques synchronisés |
 
 ## Indicateurs

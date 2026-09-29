@@ -171,7 +171,8 @@ export class Scene3D {
 
   setView(name) {
     const t = this.controls.target.clone();
-    const dist = 4.5;
+    // En format portrait (téléphone), on recule pour garder ~4 m de largeur visible.
+    const dist = 4.5 * Math.max(1, 1.3 / (this.camera.aspect || 1));
     if (name === 'camera' && this.cameraPose) {
       const c = this.cameraPose;
       this.camera.position.set(...c.position);

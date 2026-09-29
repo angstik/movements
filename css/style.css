@@ -178,9 +178,83 @@ progress { width: 100%; margin-top: 10px; accent-color: var(--accent); }
 @media (max-width: 1200px) {
   .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "video view3d" "controls charts"; }
 }
+
+.drop-hint[hidden] { display: none; }
+
+/* ---------- menus, bibliothèque ---------- */
+.menu { position: relative; }
+.menu summary { list-style: none; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu-list {
+  position: absolute; right: 0; top: 36px; z-index: 20; display: flex; flex-direction: column; gap: 6px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25); min-width: 220px;
+}
+.menu-list .btn { justify-content: flex-start; }
+
+.library {
+  width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 16px;
+  background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: 12px;
+}
+.library::backdrop { background: rgba(0, 0, 0, 0.5); }
+.library-head { display: flex; align-items: center; justify-content: space-between; }
+.library-head h2 { margin: 0; }
+.keep { display: flex; gap: 6px; align-items: center; color: var(--text-secondary); margin: 6px 0 12px; }
+.library-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.library-list li {
+  display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px;
+}
+.library-list img, .library-list .nothumb { width: 96px; height: 60px; object-fit: cover; border-radius: 4px; background: var(--surface-2); }
+.lib-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-meta { font-size: 12px; color: var(--text-muted); }
+.lib-actions { display: flex; gap: 6px; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 10px; border: 1px solid var(--series-pair); color: var(--text-secondary); margin-left: 6px; }
+.library-empty { color: var(--text-muted); font-size: 13px; }
+
+/* ---------- mobile ---------- */
+.mobile-only { display: none !important; }
+.tabbar { display: none; grid-area: tabs; }
+@media (pointer: coarse) {
+  label.mobile-only { display: inline-flex !important; }
+  p.mobile-only { display: block !important; }
+}
 @media (max-width: 800px) {
-  .layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "video" "view3d" "controls" "charts"; padding: 12px 16px; }
+  label.mobile-only { display: inline-flex !important; }
+  p.mobile-only { display: block !important; }
+  .topbar { padding: 8px 16px; gap: 6px; padding-top: max(8px, env(safe-area-inset-top)); }
+  .topbar h1 { font-size: 15px; width: 100%; }
+  .topbar .spacer { display: none; }
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "video" "tabs" "view3d" "charts" "controls";
+    padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); gap: 8px;
+  }
+  .panel { padding: 10px; }
+  .stage { max-height: 48vh; }
+  .transport { flex-wrap: wrap; }
+  .transport .btn.icon { padding: 8px 12px; }
+  .transport input[type="range"] { height: 28px; order: 10; flex-basis: 100%; }
+  .transport .time { margin-left: auto; }
+  .tabbar {
+    display: flex; gap: 4px; position: sticky; top: 0; z-index: 6;
+    background: var(--bg); padding: 4px 0;
+  }
+  .tab {
+    flex: 1; font: inherit; font-size: 14px; padding: 9px 0; border-radius: 8px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .view3d-panel.active { display: flex; }
+  .view3d { min-height: 45vh; }
+  .views .btn.small { padding: 6px 9px; }
   .charts { grid-template-columns: minmax(0, 1fr); }
   .metric-list { width: min(330px, calc(100vw - 48px)); }
+  .library-list li { grid-template-columns: 72px minmax(0, 1fr); }
+  .library-list img, .library-list .nothumb { width: 72px; height: 48px; }
+  .lib-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .menu-list { right: auto; left: 0; }
+  input[type="number"], input[type="text"], select { font-size: 16px; } /* évite le zoom auto iOS */
 }
-.drop-hint[hidden] { display: none; }

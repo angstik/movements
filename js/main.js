@@ -5,6 +5,7 @@ import { computeMetrics, METRICS, PAIR_METRICS } from './biomech.js';
 import { drawOverlay } from './overlay.js';
 import { Scene3D } from './scene3d.js';
 import { ChartPanel } from './charts.js';
+import * as library from './library.js';
 
 const $ = (id) => document.getElementById(id);
 const video = $('video');
@@ -21,7 +22,11 @@ const state = {
   current: 0,
   cancel: false,
   busy: false,
+  libraryId: null,      // entrée de bibliothèque de la vidéo courante
+  pendingKeep: null,    // fichier à ajouter à la bibliothèque une fois les métadonnées lues
+  pendingAnalysis: null, // analyse à restaurer une fois la vidéo chargée
 };
+const isTouch = matchMedia('(pointer: coarse)').matches;
 
 const DEFAULT_METRICS = ['comY', 'margin', 'comDist', 'bearingBA', 'trunkTilt', 'kneeL', 'kneeR', 'pelvisYawRate'];
 let selectedMetrics = new Set(DEFAULT_METRICS);
@@ -67,14 +72,49 @@ function setStatus(msg) { $('status').textContent = msg; }
 function names() { return [$('nameA').value || 'A', $('nameB').value || 'B']; }
 
 // ---------- chargement vidéo ----------
-function loadVideoFile(file) {
-  if (!file || !file.type.startsWith('video/')) { setStatus('Fichier non vidéo.'); return; }
-  state.fileName = file.name;
-  if (video.src) URL.revokeObjectURL(video.src);
+const VIDEO_EXT = /\.(mp4|m4v|mov|webm|mkv|3gp)$/i;
+
+// Certaines galeries mobiles ne renseignent pas le type MIME : on accepte aussi par extension.
+function loadVideoFile(file, { libraryId = null, analysis = null } = {}) {
+  if (!file || !((file.type || '').startsWith('video/') || VIDEO_EXT.test(file.name || ''))) {
+    setStatus('Fichier non vidéo.');
+    return;
+  }
+  state.fileName = file.name || 'video';
+  state.libraryId = libraryId;
+  state.pendingKeep = libraryId ? null : file;
+  state.pendingAnalysis = analysis;
+  if (video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(file);
   video.load();
 }
-$('fileInput').addEventListener('change', (e) => loadVideoFile(e.target.files[0]));
+for (const id of ['fileInput', 'captureInput']) {
+  $(id).addEventListener('change', (e) => {
+    loadVideoFile(e.target.files[0]);
+    e.target.value = '';
+  });
+}
+
+// Vidéo par adresse : téléchargée en mémoire (le serveur doit autoriser CORS).
+$('urlBtn').addEventListener('click', async () => {
+  const url = prompt('Adresse directe d\'un fichier vidéo (.mp4, .webm…) :');
+  if (!url) return;
+  if (/(^|\.)(youtube\.com|youtu\.be)\//i.test(url.replace(/^https?:\/\//, ''))) {
+    setStatus('YouTube ne fournit pas de fichier vidéo lisible par une page web (flux protégé, pas de CORS). '
+      + 'Téléchargez la vidéo à part (si vous en avez le droit), puis ouvrez le fichier ici.');
+    return;
+  }
+  try {
+    setStatus('Téléchargement de la vidéo…');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'video.mp4');
+    loadVideoFile(new File([blob], name, { type: blob.type || 'video/mp4' }));
+  } catch (err) {
+    setStatus(`Téléchargement impossible (${err.message}). Le serveur doit autoriser l'accès (CORS) ; sinon, téléchargez le fichier puis ouvrez-le.`);
+  }
+});
 const stage = $('stage');
 stage.addEventListener('dragover', (e) => { e.preventDefault(); stage.classList.add('dragover'); });
 stage.addEventListener('dragleave', () => stage.classList.remove('dragover'));
@@ -111,8 +151,35 @@ video.addEventListener('loadedmetadata', async () => {
   const sameVideo = state.extraction && state.extraction.width === video.videoWidth && state.extraction.height === video.videoHeight;
   if (!sameVideo) resetAnalysis();
   setStatus(`${state.fileName} — ${video.videoWidth}×${video.videoHeight}, ${video.duration.toFixed(2)} s.${sameVideo ? ' Analyse chargée conservée.' : ''}`);
+  if (state.pendingAnalysis) {
+    const data = state.pendingAnalysis;
+    state.pendingAnalysis = null;
+    applyAnalysisData(data);
+    setStatus(`${state.fileName} — analyse restaurée depuis la bibliothèque (${data.frames.length} images).`);
+  }
+  if (state.pendingKeep && $('autoKeep').checked) await keepInLibrary(state.pendingKeep);
+  state.pendingKeep = null;
   render();
 });
+
+async function keepInLibrary(file) {
+  try {
+    // Vignette prise à 1 s (la première image est souvent noire).
+    const t = Math.min(1, video.duration / 2);
+    video.currentTime = t;
+    await new Promise((r) => video.addEventListener('seeked', r, { once: true }));
+    const thumb = library.makeThumbnail(video);
+    video.currentTime = 0;
+    state.libraryId = await library.addVideo({
+      name: state.fileName, blob: file, duration: video.duration,
+      width: video.videoWidth, height: video.videoHeight, thumb,
+    });
+    library.requestPersistence();
+  } catch (err) {
+    console.warn(err);
+    setStatus(`Vidéo non ajoutée à la bibliothèque (${err.name === 'QuotaExceededError' ? 'espace de stockage insuffisant' : err.message}).`);
+  }
+}
 video.addEventListener('error', () => setStatus('Lecture impossible : format ou codec non pris en charge par ce navigateur (essayez H.264/MP4).'));
 
 function resetAnalysis() {
@@ -208,6 +275,9 @@ $('analyzeBtn').addEventListener('click', async () => {
   $('cancelBtn').hidden = false;
   $('progress').hidden = false;
   $('progress').value = 0;
+  // Empêche la mise en veille de l'écran pendant l'analyse (téléphone).
+  let wakeLock = null;
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { /* non supporté */ }
   try {
     const extraction = await extractPoses(video, {
       start, end,
@@ -226,6 +296,7 @@ $('analyzeBtn').addEventListener('click', async () => {
     const two = extraction.frames.filter((f) => f.detections.length >= 2).length;
     setStatus(`${extraction.frames.length} images analysées${state.cancel ? ' (interrompu)' : ''} — 2 personnes détectées sur ${(100 * two / extraction.frames.length).toFixed(0)} % des images.`);
     video.currentTime = start;
+    persistAnalysis();
   } catch (err) {
     console.error(err);
     setStatus(`Erreur : ${err.message}`);
@@ -234,6 +305,7 @@ $('analyzeBtn').addEventListener('click', async () => {
     $('analyzeBtn').disabled = false;
     $('cancelBtn').hidden = true;
     $('progress').hidden = true;
+    wakeLock?.release().catch(() => {});
   }
 });
 
@@ -256,7 +328,21 @@ function recompute() {
   buildCharts();
   render();
 }
-['hfov', 'sigma', 'maxGap', 'ground', 'contactTol'].forEach((id) => $(id).addEventListener('change', recompute));
+['hfov', 'sigma', 'maxGap', 'ground', 'contactTol'].forEach((id) => $(id).addEventListener('change', () => {
+  recompute();
+  persistAnalysis();
+}));
+
+// Enregistre l'analyse courante dans la bibliothèque (regroupe les appels rapprochés).
+let persistTimer = 0;
+function persistAnalysis() {
+  if (!state.libraryId || !state.extraction) return;
+  clearTimeout(persistTimer);
+  const id = state.libraryId;
+  persistTimer = setTimeout(() => {
+    library.saveAnalysis(id, serializeAnalysis()).catch((err) => console.warn('Sauvegarde bibliothèque', err));
+  }, 800);
+}
 ['nameA', 'nameB'].forEach((id) => $(id).addEventListener('input', () => {
   $('legendA').textContent = names()[0];
   $('legendB').textContent = names()[1];
@@ -267,6 +353,7 @@ $('swapBtn').addEventListener('click', () => {
   if (!state.assigned) return;
   swapFrom(state.assigned, state.current);
   recompute();
+  persistAnalysis();
   setStatus(`Identités A/B inversées à partir de t = ${state.times[state.current].toFixed(2)} s.`);
 });
 
@@ -345,9 +432,9 @@ function download(name, content, type) {
 const round = (arr, d = 4) => Array.from(arr, (v) => +v.toFixed(d));
 const baseName = () => (state.fileName || 'analyse').replace(/\.[^.]+$/, '');
 
-$('exportJson').addEventListener('click', () => {
+function serializeAnalysis() {
   const { width, height, fps, frames } = state.extraction;
-  const data = {
+  return {
     format: 'aiki-filaire/1',
     video: state.fileName, width, height, fps,
     names: names(),
@@ -361,7 +448,9 @@ $('exportJson').addEventListener('click', () => {
     scene: state.recon.frames.map((pp) => pp.map((p) => (p ? round(p.joints, 4) : null))),
     camera: state.recon.camera,
   };
-  download(`${baseName()}.aiki.json`, JSON.stringify(data), 'application/json');
+}
+$('exportJson').addEventListener('click', () => {
+  download(`${baseName()}.aiki.json`, JSON.stringify(serializeAnalysis()), 'application/json');
 });
 
 $('exportCsv').addEventListener('click', () => {
@@ -392,24 +481,113 @@ $('jsonInput').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const data = JSON.parse(await file.text());
-    if (data.format !== 'aiki-filaire/1') throw new Error('format inconnu');
-    const toDet = (p) => (p ? { img: Float32Array.from(p.img), world: Float32Array.from(p.world) } : null);
-    state.extraction = {
-      width: data.width, height: data.height, fps: data.fps,
-      frames: data.frames.map((f) => ({ t: f.t, detections: f.persons.filter(Boolean).map(toDet) })),
-    };
-    state.assigned = data.frames.map((f) => f.persons.map(toDet));
-    if (data.names) { $('nameA').value = data.names[0]; $('nameB').value = data.names[1]; }
-    for (const [id, v] of Object.entries(data.settings || {})) if ($(id)) $(id).value = v;
-    $('legendA').textContent = names()[0];
-    $('legendB').textContent = names()[1];
-    recompute();
+    applyAnalysisData(data);
     setStatus(`Analyse chargée (${data.frames.length} images). Ouvrez la vidéo « ${data.video} » pour la superposition.`);
   } catch (err) {
     setStatus(`Fichier d'analyse invalide : ${err.message}`);
   }
   e.target.value = '';
 });
+
+function applyAnalysisData(data) {
+  if (data.format !== 'aiki-filaire/1') throw new Error('format inconnu');
+  const toDet = (p) => (p ? { img: Float32Array.from(p.img), world: Float32Array.from(p.world) } : null);
+  state.extraction = {
+    width: data.width, height: data.height, fps: data.fps,
+    frames: data.frames.map((f) => ({ t: f.t, detections: f.persons.filter(Boolean).map(toDet) })),
+  };
+  state.assigned = data.frames.map((f) => f.persons.map(toDet));
+  if (data.names) { $('nameA').value = data.names[0]; $('nameB').value = data.names[1]; }
+  for (const [id, v] of Object.entries(data.settings || {})) if ($(id)) $(id).value = v;
+  $('legendA').textContent = names()[0];
+  $('legendB').textContent = names()[1];
+  recompute();
+}
+
+// ---------- bibliothèque ----------
+const fmtSize = (b) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} Go` : `${(b / 1e6).toFixed(0)} Mo`);
+const fmtDate = (d) => new Date(d).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+
+async function renderLibrary() {
+  const list = $('libraryList');
+  list.innerHTML = '';
+  let entries = [];
+  try {
+    entries = await library.listEntries();
+  } catch (err) {
+    list.innerHTML = `<li class="library-empty">Bibliothèque indisponible dans ce navigateur (${err.message}).</li>`;
+    return;
+  }
+  const est = await library.storageEstimate();
+  $('libraryInfo').textContent = 'Les vidéos et analyses restent dans ce navigateur, sur cet appareil.'
+    + (est?.quota ? ` Espace utilisé : ${fmtSize(est.usage)} sur ${fmtSize(est.quota)} disponibles.` : '');
+  if (!entries.length) {
+    list.innerHTML = '<li class="library-empty">Aucune vidéo. Ouvrez ou filmez une vidéo : elle sera ajoutée ici.</li>';
+    return;
+  }
+  for (const e of entries) {
+    const li = document.createElement('li');
+    const img = e.thumb ? document.createElement('img') : document.createElement('div');
+    if (e.thumb) { img.src = e.thumb; img.alt = ''; } else img.className = 'nothumb';
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'lib-name';
+    name.textContent = e.name;
+    if (e.hasAnalysis) {
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = 'analysée';
+      name.appendChild(b);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'lib-meta';
+    meta.textContent = `${fmtDate(e.date)} · ${e.duration ? e.duration.toFixed(1) : '?'} s · ${e.width}×${e.height} · ${fmtSize(e.size)}`;
+    info.append(name, meta);
+    const actions = document.createElement('div');
+    actions.className = 'lib-actions';
+    const open = document.createElement('button');
+    open.className = 'btn small primary';
+    open.textContent = 'Ouvrir';
+    open.addEventListener('click', async () => {
+      const entry = await library.getEntry(e.id);
+      if (!entry) return;
+      $('libraryDlg').close();
+      resetAnalysis();
+      loadVideoFile(new File([entry.blob], entry.name, { type: entry.type || 'video/mp4' }), { libraryId: entry.id, analysis: entry.analysis });
+    });
+    const del = document.createElement('button');
+    del.className = 'btn small';
+    del.textContent = 'Supprimer';
+    del.addEventListener('click', async () => {
+      if (!confirm(`Supprimer « ${e.name} » et son analyse de la bibliothèque ?`)) return;
+      await library.deleteEntry(e.id);
+      if (state.libraryId === e.id) state.libraryId = null;
+      renderLibrary();
+    });
+    actions.append(open, del);
+    li.append(img, info, actions);
+    list.appendChild(li);
+  }
+}
+$('libraryBtn').addEventListener('click', () => { renderLibrary(); $('libraryDlg').showModal(); });
+$('libraryClose').addEventListener('click', () => $('libraryDlg').close());
+$('libraryDlg').addEventListener('click', (e) => { if (e.target === $('libraryDlg')) $('libraryDlg').close(); });
+try {
+  $('autoKeep').checked = localStorage.getItem('aiki.autoKeep') !== '0';
+} catch { /* ignore */ }
+$('autoKeep').addEventListener('change', (e) => {
+  try { localStorage.setItem('aiki.autoKeep', e.target.checked ? '1' : '0'); } catch { /* ignore */ }
+});
+
+// ---------- onglets (mobile) ----------
+document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.classList.contains(tab.dataset.tab)));
+  if (tab.dataset.tab === 'charts-panel') charts.redraw();
+}));
+
+// Réglages par défaut plus légers sur téléphone.
+if (isTouch) $('model').value = 'lite';
 
 applyTheme();
 scene.setView('front');
